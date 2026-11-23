@@ -3,10 +3,23 @@
 A player, not a library: open a file, it plays at once, the rest of the folder queues up behind it. No library setup, no indexing, no database
 (settings, history, resume positions, per-show choices are small JSON files in `%APPDATA%\local.flux\`; the app works without them).
 
+![Flux playing an episode with the rest of the season queued in the side panel](docs/screenshots/queue.png)
+
 Playback is **mpv** drawn into a child window over the web UI, controlled over mpv's JSON pipe. The controls float on the picture: the page
 cuts a rounded hole in mpv's window under each visible overlay (`host_rect` cuts), so the video never resizes. Rust (`src-tauri/src/lib.rs`)
 starts mpv (right at launch when opened with a file, before the web view has loaded), forwards commands, lists folders, reads durations,
 makes thumbnails, runs Whisper, saves clips, recycles files and registers media keys. Everything else is `src/`.
+
+## How it works
+
+| | |
+|---|---|
+| ![The home screen with Continue watching cards](docs/screenshots/home.png) | ![The floating control bar over the video](docs/screenshots/playing.png) |
+| **1. Open a file** (or a folder, or pick up from Continue watching). It starts playing at once and resumes where you stopped. | **2. The controls float on the picture** and hide after 3 s. The seek bar shows chapters and intro/outro bands. |
+| ![The queue panel with the folder's episodes in order](docs/screenshots/queue.png) | ![The chapters panel with Intro and Outro tags](docs/screenshots/chapters.png) |
+| **3. The folder queues up behind it.** Episodes of the same show are found and put in order (Q opens the queue). | **4. Skip what you don't need.** Chapters (C) are tagged Recap, Intro, Outro and Preview, and intros can be skipped automatically. |
+
+The show and files in these screenshots are made up.
 
 ## Download
 The installer is on the [Releases](https://github.com/JustSad42/flux/releases/latest) page (`Flux_<version>_x64-setup.exe`). Installed copies
