@@ -9,22 +9,14 @@ import { getVersion } from '@tauri-apps/api/app';
 import { Queue, pkey } from './queue/queue';
 import { base, dirname, discover, join, kindOf, natCompare, parse, Opts } from './queue/match';
 import { isSub, pickSubs, SubCand } from './media/subs';
-import { bandAt, Band, Chap, chapterTarget, Learned, markersFor, resumeStart } from './media/markers';
+import { bandAt, Band, Chap, chapterTarget, markersFor, resumeStart } from './media/markers';
 import { paintIcons } from './icons';
-
-const DEF = {
-  v: 0, // settings version, see migrate()
-  autoQueue: true, sensitivity: 'balanced' as Opts['sensitivity'], scanSubfolders: false, sameCategory: true, wholeFolder: true,
-  autoplayNext: true, includeAll: false, rememberQueue: false, maxAuto: 200, mpvPath: '', volume: 100, hideAfter: 3,
-  autoSkip: 'ask' as 'off' | 'ask' | 'auto', mediaKeys: true, autoSubs: true, subLang: 'eng', thumbnails: true,
-  // Whisper: wAuto = these were filled in from what Flux found on the PC (and may be refreshed); false once edited by hand
-  wFlavor: 'cpp', wExe: '', wModel: '', wLang: '', wTranslate: false, wTemplate: '', wVad: '', wAuto: true,
-  wVadOn: false, // speech detection: great for talking, but drops real lines in game audio, so it is opt-in
-  subScale: 1, subPos: 100, subBox: false, normalize: false, keepInTray: true, clipMode: 'copy' as 'copy' | 'exact' | 'small',
-};
-type Settings = typeof DEF;
-type Hist = Record<string, { pos: number; dur: number; at: number; p?: string }>; // p = path with its original case
-type Prefs = Record<string, Learned & { a?: string; s?: string; mix?: boolean }>; // per show (or folder): audio/subtitle language, mix all audio tracks, learned intro/outro
+import { $, fmt, prettyName, rd, sleepMs, wr } from './util';
+import { ask, dropReplies, mpvRunning, onMpvError, osd, send, takeReply } from './mpv';
+import { closeMenu, hostReady, menuOpen, onMenuOpen, openMenu, setFloat, syncRect, toast } from './overlay';
+import { DEF, FIELDS, Hist, LIMITS, migrate, Prefs, Settings } from './settings';
+// The player: state, playback, queue, timeline, subtitles, Whisper, clips, keys and start-up.
+// Pure logic (names, queue, subtitles, markers) is in queue/ and media/, with tests.
 
 let S: Settings = { ...DEF };
 let hist: Hist = {};
@@ -32,11 +24,11 @@ let prefs: Prefs = {};
 let q = new Queue();
 let pos = 0, dur = 0, paused = true, loaded = false, ready = false, modal = false, speedNow = 1;
 let histDirty = false, setDirty = false, scanGen = 0, errStreak = 0, seeking = false, lastUi = 0;
-let probeGen = 0, probeTimer = 0, renderTimer = 0, msgTimer = 0, idleTimer = 0, thumbTimer = 0, overBar = false;
+let probeGen = 0, probeTimer = 0, renderTimer = 0, idleTimer = 0, thumbTimer = 0, overBar = false;
 let chapters: Chap[] = [], bands: Band[] = [], tracks: any[] = [], subCands: (SubCand & { full: string })[] = [];
 let thumbGen = 0, thumbFor = '', thumbs: string[] = [], thumbN = 0, accentDone = false, curChap = -1, lastPlayIcon = '';
 let abA: number | null = null, abB: number | null = null, recycleArm = '', recycleTimer = 0;
-let booted = false, preloading = false, holding = true, applyPrefs: { a?: string; s?: string } | null = null;
+let preloading = false, holding = true, applyPrefs: { a?: string; s?: string } | null = null;
 let nearBottom = false, mixing = false, seekBusy = false, seekWant: number | null = null, seekWasPaused = false, subDelay = 0;
 const held: any[] = []; // mpv events that arrive while the page is still starting up
 let tab: 'queue' | 'chapters' | 'subs' = 'queue';
@@ -44,69 +36,8 @@ const skipDone = new Set<string>();
 const durs: Record<string, number> = {}; // durations read in the background, before a file has ever played
 const dur0 = (path: string) => durs[pkey(path)] ?? hist[pkey(path)]?.dur;
 
-const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
-const rd = async (n: string) => { try { const t = await invoke<string | null>('store_read', { name: n }); return t ? JSON.parse(t) : null; } catch { return null; } };
-const wr = (n: string, v: unknown) => { invoke('store_write', { name: n, text: JSON.stringify(v) }).catch(() => {}); };
-const send = (...command: unknown[]) => invoke('mpv_cmd', { line: JSON.stringify({ command }) }).catch(e => toast(String(e)));
-const osd = (t: string) => send('show-text', t, 1500);
-const fmt = (s: number) => { s = Math.max(0, Math.floor(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, x = s % 60;
-  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
 const opts = (all = false): Opts => ({ sensitivity: S.sensitivity, sameCategory: S.sameCategory, includeAll: all || S.includeAll, max: S.maxAuto, wholeFolder: S.wholeFolder });
 const seriesKey = (path: string) => parse(path)?.series || pkey(dirname(path));
-const prettyName = (path: string) => {
-  const stem = base(path).replace(/\.[^.]+$/, ''), t = stem.replace(/\[[^\]]*\]|\([^)]*\)/g, ' ').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
-  return t || stem;
-};
-const sleepMs = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-let reqId = 100;
-const waiting = new Map<number, (v: any) => void>();
-/** Send an mpv command and wait for its answer (null on error or after 2 s). */
-const ask = (...command: unknown[]) => new Promise<any>(res => {
-  const id = ++reqId;
-  waiting.set(id, res);
-  setTimeout(() => { if (waiting.delete(id)) res(null); }, 2000);
-  invoke('mpv_cmd', { line: JSON.stringify({ command, request_id: id }) }).catch(() => { if (waiting.delete(id)) res(null); });
-});
-
-// ---- floating overlays ----
-// mpv's native window sits on top of the page, so anything drawn over the picture needs a hole cut into that window.
-// Every visible `.float.on` element gets one (rounded like the element); the video itself never changes size.
-let rectQueued = false;
-function syncRect() {
-  if (rectQueued) return;
-  rectQueued = true;
-  requestAnimationFrame(() => { rectQueued = false; placeHost(); });
-}
-function placeHost() {
-  if (!booted) return;
-  const v = $('video').getBoundingClientRect(), d = devicePixelRatio, show = (loaded || preloading) && !modal;
-  const cuts: number[][] = [];
-  if (show) document.querySelectorAll<HTMLElement>('#video .float.on').forEach(el => {
-    const r = el.getBoundingClientRect();
-    if (r.width < 1 || r.height < 1) return;
-    const rad = Math.min(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0, r.width / 2, r.height / 2);
-    cuts.push([Math.floor((r.left - v.left) * d), Math.floor((r.top - v.top) * d), Math.ceil(r.width * d) + 1, Math.ceil(r.height * d) + 1, Math.round(rad * d)]);
-  });
-  invoke('host_rect', { x: Math.round(v.left * d), y: Math.round(v.top * d), w: Math.round(v.width * d), h: Math.round(v.height * d), show, cuts }).catch(() => {});
-}
-function setFloat(el: HTMLElement, on: boolean) {
-  el.classList.toggle('on', on);
-  syncRect();
-}
-new ResizeObserver(syncRect).observe($('video'));
-new ResizeObserver(syncRect).observe($('bar'));
-
-/** Short message floating at the top, optionally with one action button (e.g. "Start over"). */
-function toast(text: string, action?: { label: string; fn: () => void }, ms = 6000) {
-  $('msg').textContent = text;
-  const b = $('msgact') as HTMLButtonElement;
-  b.hidden = !action; $('toast').classList.toggle('act', !!action);
-  if (action) { b.textContent = action.label; b.onclick = () => { action.fn(); toast(''); }; }
-  clearTimeout(msgTimer);
-  setFloat($('toast'), !!text);
-  if (text) msgTimer = window.setTimeout(() => toast(''), ms);
-}
 
 // ---- controls hide when the mouse is still ----
 function wake() {
@@ -117,13 +48,16 @@ function wake() {
 }
 function doze() {
   // stays up while the pointer is on the controls, near the bottom edge (also in fullscreen), dragging, or a menu is open
-  if (overBar || nearBottom || seeking || modal || $('menu').classList.contains('on')) { idleTimer = window.setTimeout(doze, 500); return; }
+  if (overBar || nearBottom || seeking || modal || menuOpen()) { idleTimer = window.setTimeout(doze, 500); return; }
   document.body.classList.add('idle');
   setFloat($('bar'), false); hidePreview();
 }
 $('bar').onmouseenter = () => { overBar = true; };
 $('bar').onmouseleave = () => { overBar = false; wake(); };
 addEventListener('mousemove', () => wake());
+onMenuOpen(() => wake());
+document.addEventListener('visibilitychange', () => { if (!document.hidden) document.documentElement.classList.remove('asleep'); });
+onMpvError(e => toast(e));
 
 // ---- playback ----
 function markLoaded() {
@@ -139,7 +73,7 @@ function unload() {
   renderRecent(); syncRect();
 }
 function resetFile() {
-  flushHist();
+  saveAll();
   ready = false; pos = 0; dur = 0; chapters = []; bands = []; tracks = []; subCands = []; curChap = -1;
   skipDone.clear(); thumbFor = ''; thumbs = []; thumbN = 0; accentDone = false; clearTimeout(thumbTimer);
   invoke('make_thumbs', { path: '', dur: 0, n: 0, id: ++thumbGen }).catch(() => {}); // stops the previous file's job
@@ -230,17 +164,21 @@ function dropFiles(paths: string[], append: boolean) {
 
 // ---- mpv events ----
 function onMpv(m: any) {
-  if (m.request_id && waiting.has(m.request_id)) { const f = waiting.get(m.request_id)!; waiting.delete(m.request_id); f(m.error === 'success' ? m.data : null); return; }
+  if (takeReply(m)) return;
   switch (m.event) {
     case 'property-change':
       if (m.name === 'time-pos' && ready && typeof m.data === 'number') {
         pos = m.data;
         const c = q.current;
-        if (c && dur) { hist[pkey(c.path)] = { pos, dur, at: Date.now(), p: c.path }; histDirty = true; }
+        if (c && dur) { // many times a second: update the entry in place
+          const k = pkey(c.path), h = hist[k];
+          if (h) { h.pos = pos; h.dur = dur; h.at = Date.now(); } else hist[k] = { pos, dur, at: Date.now(), p: c.path };
+          histDirty = true;
+        }
         const now = performance.now();
         if (now - lastUi > 120) { lastUi = now; ui(); }
       } else if (m.name === 'duration' && typeof m.data === 'number') { dur = m.data; startThumbs(); updateBands(); renderAB(); ui(); }
-      else if (m.name === 'pause') { paused = !!m.data; if (paused) flushHist(); ui(); }
+      else if (m.name === 'pause') { paused = !!m.data; if (paused) saveAll(); ui(); }
       else if (m.name === 'mute') { $('bmute').dataset.i = m.data ? 'mute' : 'vol'; paintIcons($('bar')); }
       else if (m.name === 'speed' && typeof m.data === 'number') { speedNow = m.data; $('spd').textContent = +speedNow.toFixed(2) + '×'; $('spd').classList.toggle('on', Math.abs(speedNow - 1) > 0.01); }
       else if (m.name === 'volume' && typeof m.data === 'number') { if (Math.round(m.data) !== S.volume) { S.volume = Math.round(m.data); setDirty = true; } setVol(S.volume); }
@@ -261,7 +199,7 @@ function onMpv(m: any) {
       }
       break;
     case 'client-message': if (m.args?.[0] === 'act') act(m.args[1], m.args[2]); break;
-    case 'shutdown': toast('mpv stopped'); break;
+    case 'shutdown': mpvGone(); break;
   }
 }
 
@@ -315,7 +253,7 @@ function toggleMix() {
   applyAudio();
   osd(p.mix ? `Mixing all ${audioTracks().length} audio tracks` : 'Audio: one track');
 }
-function toggleLevel() { S.normalize = !S.normalize; setDirty = true; flushHist(); applyAudio(); osd(S.normalize ? 'Even out loudness: on' : 'Even out loudness: off'); }
+function toggleLevel() { S.normalize = !S.normalize; setDirty = true; saveAll(); applyAudio(); osd(S.normalize ? 'Even out loudness: on' : 'Even out loudness: off'); }
 function audioMenu() {
   const a = audioTracks(), sel = a.find(t => t.selected);
   openMenu('baud', [
@@ -341,7 +279,7 @@ function subStyleUi() {
   $('sdelay').textContent = (subDelay > 0 ? '+' : '') + subDelay.toFixed(1) + ' s';
 }
 function bindSubStyle() {
-  const on = (id: string, f: (el: HTMLInputElement) => void) => { const el = $(id) as HTMLInputElement; el.oninput = () => { f(el); setDirty = true; applySubStyle(); }; el.onchange = () => flushHist(); };
+  const on = (id: string, f: (el: HTMLInputElement) => void) => { const el = $(id) as HTMLInputElement; el.oninput = () => { f(el); setDirty = true; applySubStyle(); }; el.onchange = () => saveAll(); };
   on('ssize', el => { S.subScale = +el.value; }); on('spos', el => { S.subPos = +el.value; }); on('sbox', el => { S.subBox = el.checked; });
   $('sdm').onclick = () => act('subearly'); $('sdp').onclick = () => act('sublate'); $('sd0').onclick = () => send('set_property', 'sub-delay', 0);
 }
@@ -586,14 +524,14 @@ async function detectWhisper(force: boolean) {
     S.wAuto = true;
   }
   if (force) toast(w ? `Found whisper.cpp with ${base(w.model)}` : 'No whisper.cpp found on this PC');
-  whisperUi(); flushHist();
+  whisperUi(); saveAll();
 }
 function bindWhisper() {
   const set = (id: string, key: keyof Settings, kind: 'text' | 'bool' | 'manual' = 'manual') => { const el = $(id) as HTMLInputElement | HTMLSelectElement;
     el.onchange = () => {
       (S as any)[key] = kind === 'bool' ? (el as HTMLInputElement).checked : el.value;
       if (kind === 'manual') S.wAuto = false; // a hand-picked program or model is never replaced by auto-detection
-      setDirty = true; flushHist(); whisperUi();
+      setDirty = true; saveAll(); whisperUi();
     }; };
   set('wflavor', 'wFlavor'); set('wexe', 'wExe'); set('wmodel', 'wModel'); set('wtpl', 'wTemplate'); set('wlang', 'wLang', 'text'); set('wtr', 'wTranslate', 'bool'); set('wvadon', 'wVadOn', 'bool');
   $('wgo').onclick = () => genSubs();
@@ -673,7 +611,7 @@ async function exportClip(mode: Settings['clipMode']) {
   const a = Math.min(abA, abB), b = Math.max(abA, abB);
   const aid = await ask('get_property', 'aid');
   try {
-    await invoke<string>('clip_export', { path: c.path, start: a, end: b, aid: typeof aid === 'number' ? aid : null, mode, mix: mixing ? audioTracks().length : null });
+    await invoke<string>('clip_export', { req: { path: c.path, start: a, end: b, aid: typeof aid === 'number' ? aid : null, mode, mix: mixing ? audioTracks().length : null } });
     toast(`Saving clip ${fmt(a)}–${fmt(b)}${mode === 'copy' ? '' : ' (encoding on the GPU)'}…`, undefined, 300000);
   } catch (e) { toast(String(e)); }
 }
@@ -697,7 +635,7 @@ async function doRecycle(path: string) {
     if (q.current) await load(q.current.path);
     else { await send('stop'); unload(); }
   }
-  delete hist[pkey(path)]; histDirty = true; flushHist();
+  delete hist[pkey(path)]; histDirty = true; saveAll();
   let err = '';
   for (let k = 0; k < 10; k++) { try { await invoke('recycle', { path }); err = ''; break; } catch (e) { err = String(e); await sleepMs(250); } }
   changed();
@@ -706,31 +644,6 @@ async function doRecycle(path: string) {
 const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 function setSpeed(v: number) { send('set_property', 'speed', v); osd(`Speed: ${v}×`); }
 const speedMenu = () => openMenu('spd', [{ head: 'Speed' }, ...SPEEDS.map(v => ({ label: v + '×', on: Math.abs(v - speedNow) < 0.01, fn: () => setSpeed(v) }))]);
-
-/** One floating menu above the bar, anchored on a button. Clicking the same button again closes it. */
-type MenuItemDef = { label?: string; note?: string; on?: boolean; tog?: boolean; fn?: () => void; sep?: boolean; head?: string };
-let menuFor = '';
-function openMenu(anchor: string, items: MenuItemDef[]) {
-  const m = $('menu');
-  if (m.classList.contains('on') && menuFor === anchor) return closeMenu();
-  menuFor = anchor;
-  m.replaceChildren(...items.map(it => {
-    if (it.sep) { const s = document.createElement('div'); s.className = 'sep'; return s; }
-    if (it.head) { const h = document.createElement('h4'); h.textContent = it.head; return h; }
-    const b = document.createElement('button'); b.className = (it.on ? 'on' : '') + (it.tog ? ' tog' : '');
-    const l = document.createElement('span'); l.textContent = it.label ?? ''; b.append(l);
-    if (it.note) { const n = document.createElement('small'); n.textContent = it.note; b.append(n); }
-    b.onclick = () => { closeMenu(); it.fn?.(); };
-    return b;
-  }));
-  m.classList.add('on'); wake();
-  const vr = $('video').getBoundingClientRect(), sr = $(anchor).getBoundingClientRect(), br = $('bar').getBoundingClientRect();
-  m.style.left = Math.round(Math.max(8, Math.min(vr.width - m.offsetWidth - 8, sr.left - vr.left + sr.width / 2 - m.offsetWidth / 2))) + 'px';
-  m.style.bottom = Math.round(vr.bottom - br.top + 8) + 'px';
-  syncRect();
-}
-function closeMenu() { if ($('menu').classList.contains('on')) setFloat($('menu'), false); menuFor = ''; }
-document.addEventListener('pointerdown', e => { const t = e.target as HTMLElement; if (!t.closest('#menu, #spd, #baud, #bclip')) closeMenu(); });
 
 // ---- actions & keys ----
 async function toggleFs() {
@@ -932,14 +845,15 @@ function changed() {
   if (S.rememberQueue) wr('queue.json', q);
 }
 const applyRepeat = () => send('set_property', 'loop-file', q.repeat === 'one' ? 'inf' : 'no');
-function flushHist() {
+/** Writes what changed: watch history (newest 300 files) and settings. Every 10 s, and on pause, close, settings changes. */
+function saveAll() {
   if (histDirty) {
     const keep = Object.entries(hist).sort((a, b) => b[1].at - a[1].at).slice(0, 300);
     hist = Object.fromEntries(keep); wr('history.json', hist); histDirty = false;
   }
   if (setDirty) { wr('settings.json', S); setDirty = false; }
 }
-setInterval(flushHist, 10_000);
+setInterval(saveAll, 10_000);
 
 function renderRecent() {
   const items = Object.entries(hist).filter(([, h]) => h.at).sort((a, b) => b[1].at - a[1].at).slice(0, 6);
@@ -955,26 +869,6 @@ function renderRecent() {
   }));
 }
 
-const FIELDS: [keyof Settings, string, string, 'bool' | 'num' | 'text' | string[]][] = [
-  ['autoQueue', 'Queue related files', 'Add the other episodes in the folder when you open one', 'bool'],
-  ['wholeFolder', 'Queue the whole folder', 'When nothing looks like an episode (clips, recordings, random videos), queue every video in the folder', 'bool'],
-  ['sensitivity', 'Matching sensitivity', 'balanced = confident matches only; loose also adds likely ones', ['strict', 'balanced', 'loose']],
-  ['scanSubfolders', 'Scan subfolders', 'Look in folders below the opened file too', 'bool'],
-  ['sameCategory', 'Same media type only', 'Video with video, audio with audio', 'bool'],
-  ['autoplayNext', 'Play next automatically', 'Continue with the queue when a file ends', 'bool'],
-  ['includeAll', 'Always include everything in the folder', 'Skip matching and queue every compatible file', 'bool'],
-  ['rememberQueue', 'Remember the queue', 'Restore it the next time Flux starts', 'bool'],
-  ['maxAuto', 'Longest automatic queue', 'Files', 'num'],
-  ['hideAfter', 'Hide controls after', 'Seconds without moving the mouse', 'num'],
-  ['thumbnails', 'Preview on the seek bar', 'Show a frame when you point at the seek bar (made in the background)', 'bool'],
-  ['autoSkip', 'Intro / outro skipping', 'ask = show a Skip button; auto = skip when it starts (with Undo)', ['off', 'ask', 'auto']],
-  ['mediaKeys', 'Media keys', 'Play/pause, next and previous keys work even when Flux is in the background', 'bool'],
-  ['autoSubs', 'Match subtitles automatically', 'Pick the subtitle file that belongs to the episode', 'bool'],
-  ['subLang', 'Preferred subtitle language', 'Three-letter code: eng, ara, jpn, fra…', 'text'],
-  ['keepInTray', 'Keep running in the tray', 'Closing the window keeps Flux ready next to the clock, so the next video opens instantly. Quit from the tray icon', 'bool'],
-  ['mpvPath', 'mpv location', 'Blank = the copy that comes with Flux. File or folder. Restart to apply', 'text'],
-];
-const LIMITS: Partial<Record<keyof Settings, [number, number]>> = { maxAuto: [1, 5000], hideAfter: [1, 60] };
 function buildSettings() {
   $('fields').replaceChildren(...FIELDS.map(([key, label, hint, kind]) => {
     const row = document.createElement('div'); row.className = 'srow';
@@ -985,7 +879,7 @@ function buildSettings() {
     el.onchange = () => {
       const [lo, hi] = LIMITS[key] ?? [1, 5000];
       const v = kind === 'bool' ? (el as HTMLInputElement).checked : kind === 'num' ? Math.max(lo, Math.min(hi, +el.value || (DEF[key] as number))) : el.value;
-      (S as any)[key] = v; setDirty = true; flushHist();
+      (S as any)[key] = v; setDirty = true; saveAll();
       if (key === 'rememberQueue') wr('queue.json', v ? q : null);
       if (key === 'mediaKeys') invoke<string[]>('media_keys', { on: v }).then(t => { if (v && t.length) toast('Another program already owns: ' + t.join(', ')); });
       if (key === 'thumbnails' && v) { thumbFor = ''; startThumbs(); }
@@ -1006,22 +900,13 @@ async function checkUpdate(manual: boolean) {
     if (!u) { if (manual) toast('Flux is up to date'); return; }
     const go = async () => {
       toast(`Downloading Flux ${u.version}…`, undefined, 600000);
-      flushHist();
+      saveAll();
       try { await u.downloadAndInstall(); } catch (e) { toast('Update failed: ' + String(e)); }
     };
     if (manual) { ($('settings') as HTMLDialogElement).close(); }
     toast(`Flux ${u.version} is available`, { label: 'Update now', fn: go }, manual ? 30000 : 15000);
   } catch (e) { if (manual) toast('Could not check for updates: ' + String(e)); }
   finally { updBusy = false; }
-}
-
-/** One-time fixes to settings saved by older versions. */
-function migrate() {
-  if (S.v >= 2) return;
-  if (/mpv player/i.test(S.mpvPath)) S.mpvPath = '';                       // the installer ships its own mpv
-  if (/fake-whisper/i.test(S.wExe) || (S.wFlavor === 'openai' && !S.wExe)) { S.wExe = ''; S.wModel = ''; S.wFlavor = 'cpp'; }
-  S.wAuto = !S.wExe;                                                       // keep a Whisper someone set up by hand
-  S.v = 2; setDirty = true;
 }
 
 // ---- wiring ----
@@ -1057,20 +942,47 @@ getCurrentWebview().onDragDropEvent(e => {
   dropFiles(p.paths, $('side').classList.contains('open') && x >= s.left && x <= s.right && y >= s.top && y <= s.bottom); // drop on the queue = add
 });
 
+// ---- mpv's lifetime: started once, started again if it crashes (playback continues where it was) ----
+const OBSERVE: [string, number][] = [['time-pos', 1], ['duration', 2], ['pause', 3], ['volume', 4], ['speed', 5], ['mute', 6],
+  ['ab-loop-a', 7], ['ab-loop-b', 8], ['sub-delay', 9], ['video-zoom', 10]];
+let hostId = 0, crashes = 0;
+/** Starts (or reconnects to the early-started) mpv and sets it up. Returns the file mpv was already opening, if any. */
+async function connectMpv(): Promise<string | null> {
+  const pre = await invoke<string | null>('mpv_start', { host: hostId, inputConf, mpvPath: S.mpvPath });
+  mpvRunning(true);
+  OBSERVE.forEach(([n, i]) => send('observe_property', i, n));
+  send('set_property', 'volume', S.volume); applySubStyle(); applyAudio();
+  return pre;
+}
+async function mpvGone() {
+  mpvRunning(false); dropReplies(); ready = false;
+  const c = loaded ? q.current : undefined;
+  saveAll();
+  if (++crashes > 3) { unload(); toast('mpv keeps stopping. Restart Flux; the mpv log is flux-mpv.log in %TEMP%', undefined, 20000); return; }
+  setTimeout(() => { crashes = Math.max(0, crashes - 1); }, 120_000);
+  toast('mpv stopped: starting it again…');
+  try { await connectMpv(); } catch (e) { unload(); toast(String(e), undefined, 20000); return; }
+  toast('');
+  if (c) await load(c.path); // resumes from the position saved while it played (and says so)
+}
+
 (async function init() {
   const [s, h, qs, pf, file] = await Promise.all([rd('settings.json'), rd('history.json'), rd('queue.json'), rd('prefs.json'), invoke<string | null>('initial_file')]);
-  S = { ...DEF, ...(s ?? {}) }; migrate(); hist = h ?? {}; prefs = pf ?? {};
+  S = { ...DEF, ...(s ?? {}) }; if (migrate(S)) setDirty = true; hist = h ?? {}; prefs = pf ?? {};
   if (S.rememberQueue && qs && !file) { q = Queue.from(qs); render(); }
   setVol(S.volume); whisperUi(); bindWhisper(); bindSubStyle(); subStyleUi(); renderRecent(); renderChapters(); setTab('queue', false);
   invoke('set_tray', { on: S.keepInTray }).catch(() => {});
   getVersion().then(v => { $('ver').textContent = 'Flux ' + v; }).catch(() => {});
-  preloading = !!file; booted = true; syncRect(); // with a file, mpv may already be drawing it (see early_start in lib.rs)
+  preloading = !!file; // with a file, mpv may already be drawing it (see early_start in mpv.rs)
+  hostReady(() => (loaded || preloading) && !modal);
   await Promise.all([
     listen<string>('open-file', e => openAny(e.payload)), // second launch from Explorer (or the tray copy) lands here
     listen('to-tray', () => { // window closed into the tray: stop playing, remember where we were
-      flushHist(); closeMenu();
+      saveAll(); closeMenu();
       if (document.body.classList.contains('fs')) toggleFs();
       send('stop'); unload();
+      invoke('make_thumbs', { path: '', dur: 0, n: 0, id: ++thumbGen }).catch(() => {}); // no background work for a file nobody watches
+      document.documentElement.classList.add('asleep');
     }),
     listen<{ path: string; dur: number }>('dur', e => { durs[pkey(e.payload.path)] = e.payload.dur; clearTimeout(renderTimer); renderTimer = window.setTimeout(render, 300); }),
     listen<{ id: number; idx: number; data: string }>('thumb', e => {
@@ -1088,13 +1000,10 @@ getCurrentWebview().onDragDropEvent(e => {
   detectWhisper(false);
   const r = $('video').getBoundingClientRect(), d = devicePixelRatio;
   try {
-    const host = await invoke<number>('host_create', { x: Math.round(r.left * d), y: Math.round(r.top * d), w: Math.round(r.width * d), h: Math.round(r.height * d) });
-    const pre = await invoke<string | null>('mpv_start', { host, inputConf, mpvPath: S.mpvPath });
-    [['time-pos', 1], ['duration', 2], ['pause', 3], ['volume', 4], ['speed', 5], ['mute', 6], ['ab-loop-a', 7], ['ab-loop-b', 8], ['sub-delay', 9], ['video-zoom', 10]]
-      .forEach(([n, i]) => send('observe_property', i, n));
-    applySubStyle(); applyAudio();
+    hostId = await invoke<number>('host_create', { x: Math.round(r.left * d), y: Math.round(r.top * d), w: Math.round(r.width * d), h: Math.round(r.height * d) });
+    const pre = await connectMpv();
     if (pre) adopt(pre);
-    else { send('set_property', 'volume', S.volume); preloading = false; if (file) openAny(file); else syncRect(); }
+    else { preloading = false; if (file) openAny(file); else syncRect(); }
   } catch (e) { $('err').textContent = String(e); preloading = false; syncRect(); }
   finally { holding = false; held.splice(0).forEach(onMpv); } // events that came in meanwhile, in order
   setTimeout(() => checkUpdate(false), 8000);

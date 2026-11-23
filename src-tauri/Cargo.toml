@@ -1,6 +1,6 @@
 [package]
 name = "flux"
-version = "1.2.0"
+version = "1.2.1"
 edition = "2021"
 
 [lib]
@@ -20,6 +20,8 @@ tauri-plugin-global-shortcut = "2"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 base64 = "0.22"
+webview2-com = "0.39"   # same version Tauri uses: tell WebView2 when the window is hidden in the tray
+windows-core = "0.62"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_System_IO", "Win32_System_Pipes", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
 # smaller, faster flux.exe (slower to build)

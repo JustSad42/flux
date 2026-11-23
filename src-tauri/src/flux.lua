@@ -13,11 +13,25 @@ local function dims()
   return d, d.w - d.ml - d.mr, d.h - d.mt - d.mb -- window size, displayed video width/height (zoom included)
 end
 
+-- the page only needs "the mouse moved" and whether it is near the bottom: at most ~10 messages a second
+-- (a 1000 Hz mouse would otherwise send 1000 through mpv, Rust and the page), but at once when it crosses the bottom zone
+local last_sent, last_low, last_out = 0, nil, nil
 mp.observe_property('mouse-pos', 'native', function(_, p)
   if not p then return end
-  if not p.hover then act('mouseout') return end
+  if not p.hover then
+    if not last_out then last_out = true; last_low = nil; act('mouseout') end
+    return
+  end
+  last_out = false
   local d = dims()
-  if d and d.h > 0 then act('mouse', string.format('%.3f', p.y / d.h)) end
+  if d and d.h > 0 then
+    local y, now = p.y / d.h, mp.get_time()
+    local low = y > 0.8
+    if low ~= last_low or now - last_sent >= 0.1 then
+      last_sent, last_low = now, low
+      act('mouse', string.format('%.3f', y))
+    end
+  end
   if drag and drag.zoom > 0 then
     local dx, dy = p.x - drag.x, p.y - drag.y
     if math.abs(dx) + math.abs(dy) > 4 then drag.moved = true end

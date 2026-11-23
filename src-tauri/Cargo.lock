@@ -1079,7 +1079,7 @@ dependencies = [
 
 [[package]]
 name = "flux"
-version = "1.2.0"
+version = "1.2.1"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1091,6 +1091,8 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
+ "webview2-com",
+ "windows-core",
  "windows-sys 0.59.0",
 ]
 

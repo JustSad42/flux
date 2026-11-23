@@ -19,12 +19,17 @@ kbd { font: 600 10px/1 ui-monospace, Consolas, monospace; padding: 3px 6px; bord
 
 /* living background on the start screen only (switched off while a file plays: nothing animates under the video) */
 #aurora { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
-#aurora i { position: absolute; width: 55vmax; height: 55vmax; border-radius: 50%; filter: blur(90px); opacity: .28; animation: drift 26s ease-in-out infinite alternate; }
-#aurora i:nth-child(1) { background: var(--accent); left: -15vmax; top: -20vmax; }
-#aurora i:nth-child(2) { background: var(--accent2); right: -20vmax; bottom: -25vmax; animation-duration: 32s; animation-delay: -9s; }
-#aurora i:nth-child(3) { background: color-mix(in oklab, var(--accent) 50%, #26e0c0); left: 30vw; top: 35vh; width: 30vmax; height: 30vmax; opacity: .16; animation-duration: 38s; animation-delay: -15s; }
+/* soft glows are radial gradients (drawn once, then only moved by the compositor), not blur filters re-rendered every frame */
+#aurora i { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; opacity: .34; will-change: transform;
+  --c: var(--accent); background: radial-gradient(closest-side, var(--c), color-mix(in oklab, var(--c) 35%, transparent) 45%, transparent);
+  animation: drift 26s ease-in-out infinite alternate; }
+#aurora i:nth-child(1) { left: -22vmax; top: -27vmax; }
+#aurora i:nth-child(2) { --c: var(--accent2); right: -27vmax; bottom: -32vmax; animation-duration: 32s; animation-delay: -9s; }
+#aurora i:nth-child(3) { --c: color-mix(in oklab, var(--accent) 50%, #26e0c0); left: 25vw; top: 30vh; width: 40vmax; height: 40vmax; opacity: .2; animation-duration: 38s; animation-delay: -15s; }
 @keyframes drift { to { transform: translate(14vmax, 9vmax) scale(1.18); } }
 html.loaded #aurora { display: none; }
+/* hidden in the tray: nothing animates (WebView2 is also told the window is hidden; this covers the moment before) */
+html.asleep *, html.asleep *::before, html.asleep *::after { animation-play-state: paused !important; }
 
 #stage { position: relative; z-index: 1; display: flex; height: 100%; min-height: 0; }
 #video { flex: 1; min-width: 0; background: #000; display: grid; place-items: center; position: relative; overflow: hidden; }
