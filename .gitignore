@@ -1,0 +1,11 @@
+node_modules
+dist
+src-tauri/target
+src-tauri/gen
+src-tauri/resources/mpv/
+Flux-Setup*.exe
+release/
+# local test helpers, screenshots and logs: never public
+tools/
+pc-tools/
+*.log

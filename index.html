@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Flux</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body>
+<div id="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div id="stage">
+  <div id="video">
+    <div id="empty">
+      <div class="brand"><span class="logo" data-i="spark"></span><h1>Flux</h1></div>
+      <p class="tag">Open a file. The rest of the folder follows.</p>
+      <div class="cta">
+        <button id="eopen" class="pill primary" data-i="open">Open file <kbd>Ctrl O</kbd></button>
+        <button id="efolder" class="pill" data-i="open">Open folder <kbd>Ctrl D</kbd></button>
+      </div>
+      <p id="err" role="alert"></p>
+      <h2 id="rtitle" hidden>Continue watching</h2>
+      <ul id="recent" aria-label="Recently opened"></ul>
+      <p class="hint">Drop files anywhere</p>
+    </div>
+    <button id="eset" class="ib corner" data-i="gear" title="Settings" aria-label="Settings"></button>
+
+    <!-- Floating over the picture: the video window gets a hole cut under each visible one (see syncRect). -->
+    <div id="toast" class="float" role="status"><span id="msg"></span><button id="msgact" class="pill sm"></button></div>
+    <button id="skip" class="pill accent float" data-i="skip"><span id="skiplbl">Skip intro</span></button>
+    <div id="preview" class="float" aria-hidden="true"><div id="pimg"></div><span id="ptime"></span></div>
+    <div id="menu" class="float menu" role="menu"></div>
+    <footer id="bar" class="float">
+      <div id="tl" tabindex="0" role="slider" aria-label="Seek" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+        <div id="track"><div id="bands"></div><div id="ab"></div><div id="played"></div><div id="ticks"></div></div>
+        <div id="head"></div>
+      </div>
+      <div id="row">
+        <div class="grp">
+          <button id="bprev" class="ib" data-i="prev" title="Previous (P)" aria-label="Previous"></button>
+          <button id="bplay" class="ib play" data-i="play" title="Play/pause (Space)" aria-label="Play or pause"></button>
+          <button id="bnext" class="ib" data-i="next" title="Next (N)" aria-label="Next"></button>
+          <span id="time">0:00 / 0:00</span>
+        </div>
+        <div id="now"><b id="ntitle">Nothing playing</b><span id="nsub"></span></div>
+        <div class="grp">
+          <button id="wchip" class="pill sm ghost" hidden title="Generating subtitles (click for details)"></button>
+          <button id="bclip" class="pill sm ghost" data-i="clip" hidden title="Save the marked part as a clip (X)">Save clip</button>
+          <span id="zoomchip" class="pill sm ghost" hidden title="Zoomed: Ctrl+wheel to zoom, drag to move, 0 to reset"></span>
+          <button id="spd" class="pill sm ghost" title="Playback speed (1 = 0.25×, 2 = 0.5×, 3 = normal)">1×</button>
+          <button id="bmute" class="ib" data-i="vol" title="Mute (M)" aria-label="Mute"></button>
+          <input id="vol" type="range" min="0" max="130" value="100" title="Volume" aria-label="Volume">
+          <button id="baud" class="ib" data-i="audio" title="Audio track (A)" aria-label="Audio track"></button>
+          <button id="bsub" class="ib" data-i="subs" title="Subtitles (S: cycle, click: panel, G: generate)" aria-label="Subtitles"></button>
+          <button id="bch" class="ib" data-i="chapters" title="Chapters (C)" aria-label="Chapters"></button>
+          <button id="bq" class="ib" data-i="queue" title="Queue (Q)" aria-label="Queue"></button>
+          <button id="bopen" class="ib" data-i="open" title="Open file (Ctrl+O)" aria-label="Open file"></button>
+          <button id="bset" class="ib" data-i="gear" title="Settings" aria-label="Settings"></button>
+          <button id="bfs" class="ib" data-i="fs" title="Fullscreen (F)" aria-label="Fullscreen"></button>
+        </div>
+      </div>
+    </footer>
+  </div>
+  <aside id="side" aria-label="Side panel">
+    <nav id="tabs" role="tablist">
+      <button role="tab" data-tab="queue" class="on">Queue</button>
+      <button role="tab" data-tab="chapters">Chapters</button>
+      <button role="tab" data-tab="subs">Subtitles</button>
+      <i id="ink"></i>
+    </nav>
+    <section id="p-queue" class="panel">
+      <header>
+        <b id="qcount">Queue</b>
+        <span class="grow"></span>
+        <button id="qadd" class="ib sm" data-i="plus" title="Add files to the queue" aria-label="Add files"></button>
+        <button id="qshuf" class="ib sm" data-i="shuffle" title="Shuffle upcoming" aria-label="Shuffle"></button>
+        <button id="qrep" class="ib sm" data-i="repeat" title="Repeat: off" aria-label="Repeat mode"></button>
+        <button id="qclr" class="ib sm" data-i="x" title="Clear queue (keeps the playing file)" aria-label="Clear queue"></button>
+      </header>
+      <div class="qsearch"><input id="qsearch" type="search" placeholder="Search the queue   Ctrl+F" spellcheck="false" aria-label="Search the queue"></div>
+      <ol id="list"></ol>
+      <p id="qnone" class="empty" hidden>Nothing in the queue matches.</p>
+    </section>
+    <section id="p-chapters" class="panel" hidden>
+      <header><b>Chapters</b><span class="grow"></span><small id="chinfo"></small></header>
+      <ol id="chlist"></ol>
+      <p id="chempty" class="empty">This file has no chapters. Flux will still skip intros it has learned (press <kbd>I</kbd> once to teach it).</p>
+    </section>
+    <section id="p-subs" class="panel" hidden>
+      <header><b>Subtitles</b></header>
+      <div class="scroll">
+        <div id="gen" class="card">
+          <div class="gtop"><span class="gic" data-i="cc"></span><div><strong>Generate subtitles</strong><small id="wstatus">Whisper on this PC</small></div></div>
+          <div class="grow2">
+            <select id="wlang" title="Spoken language">
+              <option value="">Auto-detect language</option>
+              <option value="en">English</option><option value="ar">Arabic</option><option value="fr">French</option><option value="es">Spanish</option>
+              <option value="de">German</option><option value="it">Italian</option><option value="pt">Portuguese</option><option value="ru">Russian</option>
+              <option value="tr">Turkish</option><option value="ja">Japanese</option><option value="ko">Korean</option><option value="zh">Chinese</option>
+            </select>
+            <button id="wgo" class="pill primary" data-i="mic">Generate <kbd>G</kbd></button>
+            <button id="wstop" class="pill" hidden>Stop</button>
+          </div>
+          <div id="wbar" hidden><i id="wfill"></i></div>
+          <small id="wmsg" class="wmsg"></small>
+        </div>
+        <h3>In this file</h3>
+        <ul id="subtracks" class="tracks"></ul>
+        <h3>Found next to the video</h3>
+        <ul id="subfound" class="tracks"></ul>
+        <p id="subnone" class="empty" hidden>No matching subtitle files in the folder or its Subs folder.</p>
+        <h3>Style &amp; timing</h3>
+        <div class="form substyle">
+          <label>Size <input id="ssize" class="rng" type="range" min="0.6" max="2" step="0.05"></label>
+          <label>Height on screen <input id="spos" class="rng" type="range" min="60" max="100" step="1"></label>
+          <label class="chk"><input id="sbox" type="checkbox" class="switch"> Dark box behind the text</label>
+          <div class="sync"><span>Timing</span><button id="sdm" class="pill sm" type="button">−0.1 s</button><b id="sdelay">0.0 s</b><button id="sdp" class="pill sm" type="button">+0.1 s</button><button id="sd0" class="pill sm ghost" type="button">Reset</button></div>
+          <p class="note">Z / Shift+Z move the timing · Ctrl+← / Ctrl+→ jump to the previous / next line</p>
+        </div>
+        <details id="wsetup">
+          <summary>Whisper setup</summary>
+          <div id="wcfg" class="form">
+            <label>Program
+              <select id="wflavor">
+                <option value="cpp">whisper.cpp (whisper-cli.exe)</option>
+                <option value="openai">whisper / faster-whisper CLI</option>
+                <option value="custom">Custom command</option>
+              </select>
+            </label>
+            <label id="wexe-l">Path <input id="wexe" type="text" placeholder="C:\path\to\whisper-cli.exe" spellcheck="false"></label>
+            <label>Model <input id="wmodel" type="text" placeholder="whisper.cpp: path to the .bin · others: medium, large-v3…" spellcheck="false"></label>
+            <label class="chk"><input id="wtr" type="checkbox" class="switch"> Translate to English <small>(not with the turbo model)</small></label>
+            <label id="wtpl-l" hidden>Command <input id="wtpl" type="text" placeholder='whisper "{file}" --output_dir "{outdir}"' spellcheck="false"></label>
+            <label id="wvad-l" class="chk"><input id="wvadon" type="checkbox" class="switch"> Speech detection <small>(for talking videos)</small></label>
+            <p id="wvad" class="note"></p>
+            <button id="wfind" class="pill sm" type="button">Find Whisper on this PC</button>
+          </div>
+          <pre id="wlog" hidden></pre>
+        </details>
+      </div>
+    </section>
+  </aside>
+</div>
+<dialog id="settings"><form method="dialog"><h2>Settings</h2><div id="fields"></div>
+  <div class="dfoot"><small id="ver"></small><button id="bupd" type="button" class="pill sm">Check for updates</button><span class="grow"></span><button class="pill primary">Done</button></div>
+</form></dialog>
+<script type="module" src="/src/main.ts"></script>
+</body></html>

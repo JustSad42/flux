@@ -1,0 +1,69 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Flux",
+  "version": "1.1.1",
+  "identifier": "local.flux",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Flux",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 720,
+        "minHeight": 460,
+        "theme": "Dark"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRBODFBQUY5OTU1OTUzRDYKUldUV1UxbVYrYXFCU3BBdnJwSWJKYThHN2ZPYVN5OVR5RFEvbVl2WlRPTTNvVE4zR2lWN0hRVSsK",
+      "endpoints": ["https://github.com/JustSad42/flux/releases/latest/download/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Flux",
+    "shortDescription": "Fast media player that queues the rest of the folder",
+    "longDescription": "Flux opens a file instantly and queues the other episodes in the folder. Thumbnail timeline, chapters, skip intro, smart resume, subtitle matching.",
+    "copyright": "Flux",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "resources/mpv/*": "mpv/",
+      "THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "installer-hooks.nsh"
+      }
+    }
+  }
+}

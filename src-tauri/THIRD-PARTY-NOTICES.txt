@@ -1,0 +1,13 @@
+Flux includes or uses the following third-party software.
+
+mpv (media playback engine) - bundled unmodified in the "mpv" folder next to flux.exe
+  License: GNU GPL v2 or later (this Windows build also contains FFmpeg and other libraries, see https://mpv.io/ and the licenses at
+  https://github.com/mpv-player/mpv/blob/master/Copyright).
+  Source code: https://github.com/mpv-player/mpv  (build scripts: https://github.com/shinchiro/mpv-winbuild-cmake)
+  Flux runs mpv as a separate program and talks to it through its documented JSON IPC; mpv is not modified or linked into Flux.
+
+Tauri (application framework) - MIT or Apache-2.0 - https://tauri.app/
+Microsoft Edge WebView2 runtime (draws the interface) - installed by Windows or by the Flux installer - https://developer.microsoft.com/microsoft-edge/webview2/
+Rust crates and npm packages listed in Cargo.lock / package-lock.json - their own permissive licenses (MIT, Apache-2.0, MPL-2.0).
+
+Optional: Whisper (speech to text) is NOT included; Flux only runs a copy you installed yourself.
