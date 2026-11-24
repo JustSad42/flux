@@ -77,9 +77,48 @@ pub(crate) fn initial_file() -> Option<String> { path_arg(std::env::args()) }
 #[tauri::command]
 pub(crate) fn is_dir(path: String) -> bool { Path::new(&path).is_dir() }
 
-/// The page tells Rust whether closing the window should keep Flux in the tray.
+/// The page tells Rust whether closing the window should keep Flux running in the background.
 #[tauri::command]
 pub(crate) fn set_tray(st: State<S>, on: bool) { st.tray.store(on, Ordering::SeqCst); }
+
+/// Shows or removes the icon next to the clock. Without it, Flux still runs in the background:
+/// opening Flux (Start menu, a video) brings the window back, and Quit is in Settings and on Ctrl+Q.
+#[tauri::command]
+pub(crate) fn tray_icon(app: AppHandle, show: bool) {
+    if !show { let _ = app.remove_tray_by_id("flux"); }
+    else if app.tray_by_id("flux").is_none() { let _ = make_tray(&app); }
+}
+
+#[tauri::command]
+pub(crate) fn quit_app(app: AppHandle) { app.exit(0); }
+
+/// "Start with Windows": Flux starts hidden (`--background`) when the user signs in. A test copy never touches the real setting.
+#[tauri::command]
+pub(crate) fn set_autostart(on: bool) -> Result<(), String> {
+    if test_data_dir().is_some() { return Ok(()); }
+    let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+    let mut c = Command::new("reg");
+    if on {
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        c.args(["add", key, "/v", "Flux", "/t", "REG_SZ", "/f", "/d"]).arg(format!("\"{}\" --background", exe.display()));
+    } else {
+        c.args(["delete", key, "/v", "Flux", "/f"]);
+    }
+    let ok = quiet(&mut c, false).status().map(|s| s.success()).unwrap_or(false);
+    if ok || !on { Ok(()) } else { Err("Could not change the Windows start-up setting".into()) }
+}
+
+/// Started with `--background` (sign-in, or a second background start): no window until Flux is opened.
+pub(crate) fn background_arg<I: IntoIterator<Item = String>>(args: I) -> bool { args.into_iter().any(|a| a == "--background") }
+
+/// One saved setting, read before the page has loaded (true/false ones only).
+pub(crate) fn saved_flag(app: &AppHandle, key: &str, default: bool) -> bool {
+    data_dir(app).ok()
+        .and_then(|d| fs::read_to_string(d.join("settings.json")).ok())
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v[key].as_bool())
+        .unwrap_or(default)
+}
 
 pub(crate) fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {

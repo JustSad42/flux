@@ -719,6 +719,7 @@ function act(a: string, arg?: string) {
     case 'chapprev': chapterNav(-1); break;
     case 'chapnext': chapterNav(1); break;
     case 'shot': send('screenshot'); osd('Screenshot saved to Pictures\\Flux'); break;
+    case 'quit': saveAll(); invoke('quit_app'); break;
     case 'intro': {
       const b = bandAt(bands, pos);
       if (b) { doSkip(b); break; }
@@ -752,7 +753,7 @@ const KEYS: [string, string, string][] = [
   [',', ',', 'fback'], ['.', '.', 'fstep'], ['l', 'l', 'abloop'], ['x', 'x', 'clip'], ['delete', 'DEL', 'recycle'],
   ['pageup', 'PGUP', 'chapprev'], ['pagedown', 'PGDWN', 'chapnext'], ['ctrl+s', 'Ctrl+s', 'shot'], ['i', 'i', 'intro'], ['o', 'o', 'outro'],
   ['ctrl+arrowleft', 'Ctrl+LEFT', 'subprev'], ['ctrl+arrowright', 'Ctrl+RIGHT', 'subnext'], ['z', 'z', 'subearly'], ['shift+z', 'Z', 'sublate'],
-  ['0', '0', 'zoom0'], ['ctrl+f', 'Ctrl+f', 'search'], ['shift+a', 'A', 'audmenu'],
+  ['0', '0', 'zoom0'], ['ctrl+f', 'Ctrl+f', 'search'], ['shift+a', 'A', 'audmenu'], ['ctrl+q', 'Ctrl+q', 'quit'],
 ];
 // Single clicks, dragging, Ctrl+wheel zoom and mouse position come from flux.lua (it tells a click from a drag)
 const inputConf = [...KEYS.filter(k => k[1]).map(([, k, a]) => `${k} script-message act ${a}`),
@@ -884,6 +885,8 @@ function buildSettings() {
       if (key === 'mediaKeys') invoke<string[]>('media_keys', { on: v }).then(t => { if (v && t.length) toast('Another program already owns: ' + t.join(', ')); });
       if (key === 'thumbnails' && v) { thumbFor = ''; startThumbs(); }
       if (key === 'keepInTray') invoke('set_tray', { on: v }).catch(() => {});
+      if (key === 'trayIcon') invoke('tray_icon', { show: v }).catch(() => {});
+      if (key === 'autostart') invoke('set_autostart', { on: v }).catch(e => toast(String(e)));
     };
     row.append(t, el); return row;
   }));
@@ -924,6 +927,7 @@ qs.onkeydown = e => {
   if (e.key === 'Enter') { const li = [...$('list').children].find(x => !x.classList.contains('miss')) as HTMLElement | undefined; li?.click(); qs.blur(); }
 };
 $('bupd').onclick = () => checkUpdate(true);
+$('bquit').onclick = () => act('quit');
 $('bset').onclick = openSettings; $('eset').onclick = openSettings;
 $('settings').addEventListener('close', () => { modal = false; syncRect(); });
 $('qadd').onclick = () => openFiles(true);
@@ -972,6 +976,8 @@ async function mpvGone() {
   if (S.rememberQueue && qs && !file) { q = Queue.from(qs); render(); }
   setVol(S.volume); whisperUi(); bindWhisper(); bindSubStyle(); subStyleUi(); renderRecent(); renderChapters(); setTab('queue', false);
   invoke('set_tray', { on: S.keepInTray }).catch(() => {});
+  invoke('tray_icon', { show: S.trayIcon }).catch(() => {});
+  if (S.autostart) invoke('set_autostart', { on: true }).catch(() => {}); // written again in case an update's uninstall step removed it
   getVersion().then(v => { $('ver').textContent = 'Flux ' + v; }).catch(() => {});
   preloading = !!file; // with a file, mpv may already be drawing it (see early_start in mpv.rs)
   hostReady(() => (loaded || preloading) && !modal);

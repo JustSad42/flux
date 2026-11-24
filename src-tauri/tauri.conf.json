@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Flux",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "identifier": "local.flux",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -17,7 +17,8 @@
         "height": 760,
         "minWidth": 720,
         "minHeight": 460,
-        "theme": "Dark"
+        "theme": "Dark",
+        "visible": false
       }
     ],
     "security": {

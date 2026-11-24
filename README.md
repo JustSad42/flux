@@ -56,8 +56,7 @@ mpv is not in the repo (124 MB): `build-installer.ps1` copies it from the instal
 - **Controls**: a floating bar over the video that hides after 3 s without mouse movement (setting), also in fullscreen. Moving the
   pointer into the bottom fifth of the picture brings it up and keeps it up while the pointer stays there (`flux.lua` reports the pointer height).
 - **Open a folder**: Ctrl+D, or right-click a folder (or the empty space inside one) in Explorer → **Play with Flux**: everything in it, from the top.
-- **Tray**: closing the window keeps Flux in the tray (setting, on by default), so the next video opens instantly; Quit is in the tray icon's menu.
-  The window's size, position and maximized state are remembered.
+- **Background**: closing the window keeps Flux running hidden (setting, on by default), so the next video opens instantly; it draws nothing and uses no CPU while hidden. The tray icon is optional (Settings → Show the tray icon). Without it, open Flux from the Start menu or a video to bring it back, and quit with Ctrl+Q or Settings → Quit Flux. **Start with Windows** (off by default) starts it hidden at sign-in (`--background`). The window's size, position and maximized state are remembered.
 - **Timeline**: a thin seek bar with chapter gaps, orange/teal intro/outro bands and the A-B mark. Pointing at it shows a preview frame and the time
   above the cursor (thumbnails made in the background with mpv after playback settles, cached). The accent colour follows the picture.
 - **Chapters**: panel (C) with Intro/Outro/Preview tags; PageUp restarts the current chapter first, PageDown on the last chapter goes to the next file; no chapters = ±90 s.
@@ -91,7 +90,7 @@ mpv is not in the repo (124 MB): `build-installer.ps1` copies it from the instal
 Space or click pause · ←/→ seek 5 s · ↑/↓ or wheel volume · N next · P previous · Q queue · C chapters · U subtitles · F or double-click fullscreen · M mute ·
 A audio track · Shift+A audio menu · S subtitles cycle · G generate subtitles · Z / Shift+Z subtitle timing · Ctrl+← / Ctrl+→ previous / next line ·
 I skip intro · O skip outro · [ ] speed · 1/2/3 0.25×/0.5×/1× · Backspace speed 1 · , . frame step · Ctrl+wheel zoom · 0 reset zoom ·
-L A-B loop · X save clip · Delete Recycle Bin · PgUp/PgDn chapters · Ctrl+F search the queue · Ctrl+O open · Ctrl+D folder · Ctrl+S screenshot.
+L A-B loop · X save clip · Delete Recycle Bin · PgUp/PgDn chapters · Ctrl+F search the queue · Ctrl+Q quit · Ctrl+O open · Ctrl+D folder · Ctrl+S screenshot.
 
 ## Testing
 `FLUX_DATA=<folder>` runs a copy on separate settings/history/window position and without the single-window hand-off; give it its own `WEBVIEW2_USER_DATA_FOLDER` too.

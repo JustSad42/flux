@@ -35,6 +35,8 @@
 !macroend
 
 !macro NSIS_HOOK_POSTUNINSTALL
+  ; "Start with Windows" (the app writes it back on its next start if the setting is on, e.g. after an update)
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Flux"
   DeleteRegKey HKCU "Software\Classes\Directory\shell\Flux"
   DeleteRegKey HKCU "Software\Classes\Directory\Background\shell\Flux"
   DeleteRegKey HKCU "Software\Classes\Applications\flux.exe"

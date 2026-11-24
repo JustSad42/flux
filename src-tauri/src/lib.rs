@@ -81,13 +81,22 @@ use mpv::*;
 use system::*;
 use whisper::*;
 
+/// Test copies only (FLUX_DATA): FLUX_TEST_WAKE_MS reopens the window by itself after going to the background,
+/// standing in for a tray click or opening Flux again.
+fn test_wake(app: &AppHandle) {
+    let Some(ms) = test_data_dir().and(std::env::var("FLUX_TEST_WAKE_MS").ok()).and_then(|v| v.parse::<u64>().ok()) else { return };
+    let app = app.clone();
+    std::thread::spawn(move || { std::thread::sleep(Duration::from_millis(ms)); show_main(&app); });
+}
+
 pub fn run() {
     let mut early = pre_start(); // first of all: mpv opens the file while the rest starts
     let mut b = tauri::Builder::default();
     if test_data_dir().is_none() {
         // must be first: a second launch (double-click in Explorer) hands its file to the running window and exits
         b = b.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            show_main(app); // also brings it back from the tray (and wakes the page first)
+            if background_arg(args.iter().cloned()) { return; } // a second sign-in start: Flux is already running, stay hidden
+            show_main(app); // brings it back from the background (and wakes the page first)
             if let Some(p) = path_arg(args) { let _ = app.emit("open-file", p); }
         }));
     }
@@ -111,7 +120,18 @@ pub fn run() {
         .setup(move |app| {
             migrate_old_data(app.handle());
             if let Some(e) = early.take() { adopt_early(app.handle(), e); }
-            let _ = make_tray(app.handle());
+            if saved_flag(app.handle(), "trayIcon", true) { let _ = make_tray(app.handle()); }
+            // the window starts hidden (tauri.conf.json) so a background start (sign-in) never flashes it
+            if let Some(w) = app.get_webview_window("main") {
+                if background_arg(std::env::args()) {
+                    app.state::<S>().tray.store(true, Ordering::SeqCst); // closing must keep it running even before the page says so
+                    set_asleep(&w, true);
+                    test_wake(app.handle());
+                } else {
+                    let _ = w.show();
+                    let _ = w.set_focus();
+                }
+            }
             Ok(())
         })
         .on_window_event(|win, ev| {
@@ -124,18 +144,14 @@ pub fn run() {
                     let _ = win.emit("to-tray", ());
                     let _ = win.hide();
                     if let Some(w) = app.get_webview_window("main") { set_asleep(&w, true); }
-                    // test copies only (FLUX_DATA): FLUX_TEST_WAKE_MS reopens the window by itself, standing in for a tray click
-                    let wake = test_data_dir().and(std::env::var("FLUX_TEST_WAKE_MS").ok()).and_then(|v| v.parse::<u64>().ok());
-                    if let Some(ms) = wake {
-                        let app = app.clone();
-                        std::thread::spawn(move || { std::thread::sleep(Duration::from_millis(ms)); show_main(&app); });
-                    }
+                    test_wake(app);
                 }
             }
         })
         .invoke_handler(tauri::generate_handler![
             host_create, host_rect, mpv_start, mpv_cmd, list_dir, probe_durations, make_thumbs, whisper_detect, whisper_run, whisper_cancel,
-            clip_export, recycle, reveal, media_keys, store_read, store_write, initial_file, is_dir, set_tray
+            clip_export, recycle, reveal, media_keys, store_read, store_write, initial_file, is_dir, set_tray,
+            tray_icon, quit_app, set_autostart
         ])
         .build(tauri::generate_context!())
         .expect("error while building Flux")

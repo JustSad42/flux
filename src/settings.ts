@@ -11,6 +11,7 @@ export const DEF = {
   wFlavor: 'cpp', wExe: '', wModel: '', wLang: '', wTranslate: false, wTemplate: '', wVad: '', wAuto: true,
   wVadOn: false, // speech detection: great for talking, but drops real lines in game audio, so it is opt-in
   subScale: 1, subPos: 100, subBox: false, normalize: false, keepInTray: true, clipMode: 'copy' as 'copy' | 'exact' | 'small',
+  trayIcon: true, autostart: false, // background running: icon next to the clock; start hidden when Windows starts
 };
 export type Settings = typeof DEF;
 export type Hist = Record<string, { pos: number; dur: number; at: number; p?: string }>; // p = path with its original case
@@ -32,7 +33,9 @@ export const FIELDS: [keyof Settings, string, string, 'bool' | 'num' | 'text' | 
   ['mediaKeys', 'Media keys', 'Play/pause, next and previous keys work even when Flux is in the background', 'bool'],
   ['autoSubs', 'Match subtitles automatically', 'Pick the subtitle file that belongs to the episode', 'bool'],
   ['subLang', 'Preferred subtitle language', 'Three-letter code: eng, ara, jpn, fra…', 'text'],
-  ['keepInTray', 'Keep running in the tray', 'Closing the window keeps Flux ready next to the clock, so the next video opens instantly. Quit from the tray icon', 'bool'],
+  ['keepInTray', 'Keep running in the background', 'Closing the window keeps Flux ready (no window, no CPU), so the next video opens instantly. Quit with Ctrl+Q or the Quit button below', 'bool'],
+  ['trayIcon', 'Show the tray icon', 'An icon next to the clock while Flux runs in the background. Without it, open Flux from the Start menu or a video to bring it back', 'bool'],
+  ['autostart', 'Start with Windows', 'Flux starts hidden in the background when you sign in, so even the first video of the day opens instantly', 'bool'],
   ['mpvPath', 'mpv location', 'Blank = the copy that comes with Flux. File or folder. Restart to apply', 'text'],
 ];
 export const LIMITS: Partial<Record<keyof Settings, [number, number]>> = { maxAuto: [1, 5000], hideAfter: [1, 60] };
