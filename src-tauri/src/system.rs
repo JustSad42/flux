@@ -9,7 +9,8 @@ pub(crate) fn recycle(path: String) -> Result<(), String> {
     let mut op: SHFILEOPSTRUCTW = unsafe { std::mem::zeroed() };
     op.wFunc = FO_DELETE;
     op.pFrom = from.as_ptr();
-    op.fFlags = (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI) as u16;
+    // NUKEWARNING: ask before a delete that can't be recycled (network or removable drive)
+    op.fFlags = (FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI | FOF_WANTNUKEWARNING) as u16;
     let r = unsafe { SHFileOperationW(&mut op) };
     if r != 0 || op.fAnyOperationsAborted != 0 || Path::new(&path).exists() { Err(format!("could not move it to the Recycle Bin (code {r})")) } else { Ok(()) }
 }
@@ -27,6 +28,13 @@ pub(crate) const MEDIA_KEYS: [(Code, &str); 4] = [
 /// Returns the keys another program already owns.
 #[tauri::command]
 pub(crate) fn media_keys(app: AppHandle, on: bool) -> Vec<String> {
+    app.state::<S>().media.store(on, Ordering::SeqCst);
+    // a hidden Flux (tray, sign-in start) takes none; show_main asks for them when it comes back
+    let open = app.get_webview_window("main").is_some_and(|w| w.is_visible().unwrap_or(true));
+    register_media_keys(&app, on && open)
+}
+
+pub(crate) fn register_media_keys(app: &AppHandle, on: bool) -> Vec<String> {
     let mut taken = Vec::new();
     for (code, name) in MEDIA_KEYS {
         let sc = Shortcut::new(None, code);
@@ -126,6 +134,7 @@ pub(crate) fn show_main(app: &AppHandle) {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
+        register_media_keys(app, app.state::<S>().media.load(Ordering::SeqCst));
     }
 }
 

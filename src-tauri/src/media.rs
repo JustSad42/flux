@@ -15,7 +15,7 @@ pub(crate) fn mp4_duration(path: &str) -> Option<f64> {
         let (mut size, kind, mut hdr) = (u32::from_be_bytes(h[0..4].try_into().ok()?) as u64, [h[4], h[5], h[6], h[7]], 8u64);
         if size == 1 { f.read_exact(&mut h[8..16]).ok()?; size = u64::from_be_bytes(h[8..16].try_into().ok()?); hdr = 16; }
         else if size == 0 { size = len - at; }
-        (size >= hdr).then_some((size, kind, hdr))
+        (size >= hdr && size <= len - at).then_some((size, kind, hdr)) // a damaged size must not wrap or loop
     };
     let mut pos = 0u64;
     while pos + 8 <= len {

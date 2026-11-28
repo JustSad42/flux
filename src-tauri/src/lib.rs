@@ -25,7 +25,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutSt
 use windows_sys::Win32::Foundation::RECT;
 use windows_sys::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_DIFF};
 use windows_sys::Win32::System::Pipes::PeekNamedPipe;
-use windows_sys::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW};
+use windows_sys::Win32::UI::Shell::{SHFileOperationW, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, FOF_NOERRORUI, FOF_WANTNUKEWARNING, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, GetClientRect, SetParent, SetWindowPos, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_SHOWWINDOW, WS_CHILD,
     WS_CLIPSIBLINGS, WS_EX_TOOLWINDOW, WS_POPUP, WS_VISIBLE,
@@ -48,6 +48,7 @@ struct S {
     exe: Mutex<String>,                          // mpv.exe in use (also used for durations, thumbnails, audio extraction, clips)
     whisper: Arc<Mutex<Option<Job>>>,            // the running Whisper job, if any
     tray: AtomicBool,                            // closing the window hides Flux in the tray instead of quitting
+    media: AtomicBool,                           // the media keys are wanted (they're only held while the window is open)
 }
 
 /// A Whisper job: the process working right now (audio extraction, then the transcriber; 0 = between the two) and whether Stop was pressed.
@@ -143,6 +144,7 @@ pub fn run() {
                     let _ = app.save_window_state(WIN_STATE);
                     let _ = win.emit("to-tray", ());
                     let _ = win.hide();
+                    register_media_keys(app, false); // nothing plays in the background: leave the keys to other players
                     if let Some(w) = app.get_webview_window("main") { set_asleep(&w, true); }
                     test_wake(app);
                 }

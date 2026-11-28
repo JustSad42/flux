@@ -120,8 +120,8 @@ fn transcribe(app: &AppHandle, slot: &Mutex<Option<Job>>, cfg: &Whisper, mpv: &s
             if !cfg.vad.is_empty() && Path::new(&cfg.vad).is_file() { cmd.arg("--vad").arg("-vm").arg(&cfg.vad); } // skip non-speech
         }
         "custom" => { // {file} {outdir} {stem} {lang} {model} are replaced; {outdir} is a scratch folder, the .srt is moved next to the video
-            let line = cfg.template.replace("{file}", &cfg.file).replace("{outdir}", &tmp.to_string_lossy()).replace("{stem}", &stem)
-                .replace("{lang}", lang).replace("{model}", &cfg.model);
+            let line = fill(&cfg.template, &[("{file}", &cfg.file, true), ("{outdir}", &tmp.to_string_lossy(), true), ("{stem}", &stem, true),
+                ("{lang}", lang, false), ("{model}", &cfg.model, false)]);
             cmd = Command::new("cmd");
             cmd.raw_arg(format!("/C \"{line}\""));
         }
@@ -142,6 +142,26 @@ fn transcribe(app: &AppHandle, slot: &Mutex<Option<Job>>, cfg: &Whisper, mpv: &s
         None => Err(if ok { "Whisper finished but wrote no .srt" } else { "Whisper failed (see the log under Whisper setup)" }.into()),
     }
 }
+/// Puts values into the user's command line (run by cmd). File names can hold `&` and spaces, so a name placeholder
+/// the template didn't quote is quoted here: a downloaded file's name must never become a command.
+pub(crate) fn fill(template: &str, values: &[(&str, &str, bool)]) -> String {
+    let (mut out, mut rest, mut quoted) = (String::new(), template, false);
+    while let Some(c) = rest.chars().next() {
+        if let Some((key, value, is_name)) = values.iter().find(|v| rest.starts_with(v.0)) {
+            let wrap = *is_name && !quoted && value.contains([' ', '&', '|', '^', '<', '>', '(', ')', ',', ';', '=']);
+            if wrap { out.push('"'); }
+            out.push_str(value);
+            if wrap { out.push('"'); }
+            rest = &rest[key.len()..];
+        } else {
+            quoted ^= c == '"';
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    out
+}
+
 pub(crate) fn srt_time(s: &str) -> Option<f64> {
     let s = s.trim().replace(',', ".");
     let p: Vec<&str> = s.split(':').collect();
@@ -179,6 +199,14 @@ pub(crate) fn clean_srt(path: &Path) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn file_names_cannot_become_commands() {
+        let v = [("{file}", r"D:\a & calc.mkv", true), ("{lang}", "", false)];
+        assert_eq!(super::fill("w {file} -l {lang}", &v), r#"w "D:\a & calc.mkv" -l "#);
+        assert_eq!(super::fill(r#"w "{file}""#, &v), r#"w "D:\a & calc.mkv""#, "already quoted");
+        assert_eq!(super::fill("w {file}", &[("{file}", r"D:\a.mkv", true)]), r"w D:\a.mkv");
+    }
+
     #[test]
     fn clean_srt_drops_invented_lines_keeps_speech() {
         // real whisper.cpp output for 2 minutes of a League recording (announcer lines + invented "I don't know.")
